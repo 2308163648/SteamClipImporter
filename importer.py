@@ -14,28 +14,77 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from pb_utils import build_clip_pb, compute_names, update_gamerecording_pb
+import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------------------
-# constants
+# MPD post-processing
 # ---------------------------------------------------------------------------
 
-MPD_TEMPLATE = """\
-<?xml version="1.0" encoding="utf-8"?>
-<MPD xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="urn:mpeg:dash:schema:mpd:2011" xmlns:xlink="http://www.w3.org/1999/xlink" xsi:schemaLocation="urn:mpeg:DASH:schema:MPD:2011 http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd" profiles="urn:mpeg:dash:profile:isoff-live:2011" type="static" timeShiftBufferDepth="PT2H0M0.0S" maxSegmentDuration="PT3.0S" minBufferTime="PT6.0S" mediaPresentationDuration="PT{duration:.3f}S">
-    <Period id="0" start="PT0S">
-        <AdaptationSet id="0" contentType="video" startWithSAP="1" segmentAlignment="true" bitstreamSwitching="true" maxWidth="1920" maxHeight="1080">
-            <Representation id="0" mimeType="video/mp4" codecs="hev1.2.4.L123.B0" bandwidth="12000000" width="1920" height="1080">
-                <SegmentTemplate timescale="1000000" duration="3000000" initialization="init-stream$RepresentationID$.m4s" media="chunk-stream$RepresentationID$-$Number%05d$.m4s" startNumber="1"/>
-            </Representation>
-        </AdaptationSet>
-        <AdaptationSet id="1" contentType="audio" startWithSAP="1" segmentAlignment="true" bitstreamSwitching="true">
-            <Representation id="1" mimeType="audio/mp4" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="48000">
-                <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>
-                <SegmentTemplate timescale="1000000" duration="3000000" initialization="init-stream$RepresentationID$.m4s" media="chunk-stream$RepresentationID$-$Number%05d$.m4s" startNumber="1"/>
-            </Representation>
-        </AdaptationSet>
-    </Period>
-</MPD>"""
+def _normalize_mpd(mpd_path: str, duration_s: float):
+    """Rewrite an ffmpeg-generated MPD (using SegmentTimeline) into the
+    format Steam expects.
+
+    - Normalises both adaptation sets to timescale=1_000_000.
+    - Injects ``hev1`` codec string and sensible bandwidths.
+    - Removes elements that Steam's player does not understand.
+    """
+    ET.register_namespace('', 'urn:mpeg:dash:schema:mpd:2011')
+    ET.register_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
+    ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
+
+    tree = ET.parse(mpd_path)
+    root = tree.getroot()
+    NS = 'urn:mpeg:dash:schema:mpd:2011'
+
+    # top-level attributes
+    root.set('timeShiftBufferDepth', 'PT2H0M0.0S')
+    root.set('minBufferTime', 'PT6.0S')
+    root.set('mediaPresentationDuration', f'PT{duration_s:.3f}S')
+
+    # remove unwanted children
+    for child in list(root):
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag in ('ProgramInformation', 'ServiceDescription'):
+            root.remove(child)
+
+    for period in root.findall(f'{{{NS}}}Period'):
+        for aset in period.findall(f'{{{NS}}}AdaptationSet'):
+            ct = aset.get('contentType', '')
+            # remove ffmpeg-specific attrs
+            for attr in ('frameRate', 'par', 'lang', 'sar'):
+                aset.attrib.pop(attr, None)
+
+            for rep in aset.findall(f'{{{NS}}}Representation'):
+                if ct == 'video':
+                    rep.set('codecs', 'hev1.2.4.L123.B0')
+                    rep.set('bandwidth', '12000000')
+                    rep.set('width', '1920')
+                    rep.set('height', '1080')
+                elif ct == 'audio':
+                    rep.set('bandwidth', '128000')
+                    rep.set('audioSamplingRate', '48000')
+
+                # normalise SegmentTimeline → timescale 1_000_000
+                tmpl = rep.find(f'{{{NS}}}SegmentTemplate')
+                if tmpl is None:
+                    continue
+                old_ts = int(tmpl.get('timescale', '1000000'))
+                tmpl.set('timescale', '1000000')
+
+                tl = tmpl.find(f'{{{NS}}}SegmentTimeline')
+                if tl is None:
+                    continue
+
+                for s_elem in tl.findall(f'{{{NS}}}S'):
+                    # only patch t if explicitly present (first segment only)
+                    t_str = s_elem.get('t')
+                    if t_str is not None:
+                        t_val = int(t_str)
+                        s_elem.set('t', str(int(t_val * 1_000_000 / old_ts)))
+                    d_val = int(s_elem.get('d', '0'))
+                    s_elem.set('d', str(max(1, int(d_val * 1_000_000 / old_ts))))
+
+    tree.write(mpd_path, xml_declaration=True, encoding='utf-8')
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -184,7 +233,7 @@ def import_video(
     _report(progress_cb, 73, '正在生成 DASH 分段...')
     cmd2 = [
         'ffmpeg', '-y', '-i', frag_tmp, '-c', 'copy',
-        '-f', 'dash', '-seg_duration', '3', '-use_template', '1', '-use_timeline', '0',
+        '-f', 'dash', '-seg_duration', '3', '-use_template', '1', '-use_timeline', '1',
         '-init_seg_name', 'init-stream$RepresentationID$.m4s',
         '-media_seg_name', 'chunk-stream$RepresentationID$-$Number%05d$.m4s',
         'session.mpd',
@@ -230,10 +279,9 @@ def import_video(
     with open(tl_path, 'w', encoding='utf-8') as f:
         json.dump(tl_json, f, indent='\t')
 
-    # 5b. session.mpd (overwrite ffmpeg-generated one with Steam format)
+    # 5b. session.mpd — normalise ffmpeg-generated with SegmentTimeline
     mpd_path = os.path.join(video_dir, 'session.mpd')
-    with open(mpd_path, 'w', encoding='utf-8') as f:
-        f.write(MPD_TEMPLATE.format(duration=duration_s, width=1920, height=1080))
+    _normalize_mpd(mpd_path, duration_s)
 
     # 5c. clip.pb
     clip_pb = build_clip_pb(

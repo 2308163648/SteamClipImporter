@@ -1,0 +1,1 @@
+{"tag_name":"v1.0.0","name":"v1.0.0","body":"Steam Clip Importer - 将任意视频一键导入 Steam 游戏录制剪辑\n\n使用方法：\n1. 下载 SteamClipImporter.exe\n2. 确保已安装 ffmpeg (https://ffmpeg.org/download.html)\n3. 双击运行，选择视频 -> 输入 AppID -> 选择 Steam 录像文件夹 -> 点击导入\n4. 重启 Steam 客户端即可播放\n\n前提条件：\n- Windows 10+\n- ffmpeg / ffprobe 已添加到系统 PATH","draft":false,"prerelease":false}
