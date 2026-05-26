@@ -1,61 +1,64 @@
-# Steam Clip Importer
+# Steam Clip Importer / Steam 剪辑导入器
 
-将任意视频一键导入 Steam 游戏录制剪辑中。
+**English** | [中文](#中文)
 
-![screenshot](https://img.shields.io/badge/platform-Windows-blue)
+Import any video into Steam Game Recording as a clip — one click.
 
-## 功能
+---
 
-- 选择任意视频文件，输入 Steam AppID，一键添加到 Steam 游戏录制
-- 自动转码为 Steam 兼容的 HEVC DASH 格式
-- 保留原始画质（CRF 18, preset slow）
-- 进度条实时显示导入进度
+## Features
 
-## 前提条件
+- Select any video file, enter a Steam AppID, and add it to Steam Game Recording
+- Automatic transcoding to Steam-compatible HEVC DASH format
+- Video trimmed to clean 3-second segment boundaries for accurate progress bar
+- Real-time progress bar with percentage display
+- Safe gamerecording.pb update — original data is never corrupted
 
-- **ffmpeg** / **ffprobe** 已安装并添加到系统 PATH
-  - 下载地址: https://ffmpeg.org/download.html
+## Requirements
+
 - Windows 10+
+- **ffmpeg** / **ffprobe** installed and on system PATH
+  - Download: https://ffmpeg.org/download.html
 
-## 快速使用
+## Quick Start
 
-1. 下载 `dist/SteamClipImporter.exe`（[Releases](../../releases) 页面）
-2. 双击运行
-3. 选择视频文件
-4. 填写 Steam AppID（如 CS2=730, Dota2=570）
-5. 选择 Steam 录像文件夹（包含 `gamerecording.pb` 和 `clips/` 目录）
-6. 点击「开始导入」
-7. 重启 Steam 客户端即可在游戏录制中播放
+1. Download `SteamClipImporter.exe` from [Releases](../../releases)
+2. Double-click to launch
+3. Select a video file
+4. Enter the Steam AppID (e.g. CS2=730, Dota2=570)
+5. Select your Steam recording folder (contains `gamerecording.pb` and `clips/`)
+6. Click "开始导入" (Start Import)
+7. Restart Steam to see the clip in Game Recording
 
-## 从源码运行
+## Build from Source
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-## 打包为 exe
+## Package to .exe
 
 ```bash
 pip install pyinstaller
 pyinstaller --onefile --windowed --name "SteamClipImporter" --icon="app.ico" --add-data "app.ico;." main.py
 ```
 
-输出在 `dist/SteamClipImporter.exe`。
+Output: `dist/SteamClipImporter.exe`
 
-## 项目结构
+## Project Structure
 
 ```
-├── main.py          # tkinter GUI 界面
-├── importer.py      # 核心导入管线（转码、DASH、元数据）
-├── pb_utils.py      # Steam Protobuf 编解码
-├── requirements.txt # Python 依赖
-└── app.ico          # 应用图标
+├── main.py          # tkinter GUI
+├── importer.py      # Core import pipeline (transcode, DASH, metadata)
+├── pb_utils.py      # Steam Protobuf encode/decode
+├── requirements.txt # Python dependencies
+└── app.ico          # App icon
 ```
 
-## Steam AppID 参考
+## Steam AppID Reference
 
-| 游戏 | AppID |
+| Game | AppID |
 |------|-------|
 | CS2 | 730 |
 | Dota 2 | 570 |
@@ -64,22 +67,67 @@ pyinstaller --onefile --windowed --name "SteamClipImporter" --icon="app.ico" --a
 | Elden Ring | 1245620 |
 | PUBG | 578080 |
 
-## 原理
+## How It Works
 
-Steam 游戏录制将剪辑存储为：
+Steam Game Recording stores clips as:
 
 ```
 clips/
-  clip_<appid>_<时间>/
-    clip.pb           # Protobuf 元数据
-    thumbnail.jpg     # 缩略图
-    timelines/        # 时间线 JSON
-    video/bg_xxx/     # DASH 视频分段 (HEVC + AAC)
+  clip_<appid>_<timestamp>/
+    clip.pb           # Protobuf metadata
+    thumbnail.jpg     # Thumbnail
+    timelines/        # Timeline JSON
+    video/bg_xxx/     # DASH segments (HEVC + AAC)
       init-stream0.m4s
       chunk-stream0-00001.m4s
       ...
       session.mpd
-gamerecording.pb      # 索引文件
+gamerecording.pb      # Index file
 ```
 
-本工具自动完成视频转码 → DASH 分段 → 元数据生成 → 索引更新全流程。
+This tool automates: video transcode → DASH segmentation → metadata generation → index update.
+
+## Known Issues
+
+- After playback ends, clicking play requires two clicks to restart (Steam client limitation for externally-added clips)
+
+---
+
+## 中文
+
+将任意视频一键导入 Steam 游戏录制剪辑。
+
+### 功能
+
+- 选择任意视频文件，输入 Steam AppID，一键添加到 Steam 游戏录制
+- 自动转码为 Steam 兼容的 HEVC DASH 格式
+- 视频自动裁剪到 3 秒整倍数边界，确保进度条准确
+- 实时进度条百分比显示
+- gamerecording.pb 安全追加更新，不损坏原始数据
+
+### 前提条件
+
+- Windows 10+
+- **ffmpeg** / **ffprobe** 已安装并添加到系统 PATH
+  - 下载: https://ffmpeg.org/download.html
+
+### 快速使用
+
+1. 从 [Releases](../../releases) 下载 `SteamClipImporter.exe`
+2. 双击运行
+3. 选择视频文件
+4. 填写 Steam AppID（如 CS2=730, Dota2=570）
+5. 选择 Steam 录像文件夹（包含 `gamerecording.pb` 和 `clips/`）
+6. 点击"开始导入"
+7. 重启 Steam 客户端即可在游戏录制中播放
+
+### 从源码运行
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+### 已知问题
+
+- 播放结束后点击播放按钮需要点两次才能重新播放（Steam 客户端对外部剪辑的限制）

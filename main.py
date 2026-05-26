@@ -40,7 +40,7 @@ class App(tk.Tk):
         self._running = False
 
         self.var_video = tk.StringVar()
-        self.var_appid = tk.StringVar(value='730')
+        self.var_appid = tk.StringVar()
         self.var_folder = tk.StringVar()
         self.var_progress = tk.DoubleVar(value=0)
         self.var_status = tk.StringVar(value='就绪')
@@ -77,32 +77,32 @@ class App(tk.Tk):
                   font=('Microsoft YaHei UI', 9), bg='#f1f5f9', relief='solid', borderwidth=1,
                   cursor='hand2').pack(side='left', padx=(8, 0), ipady=3)
 
-        # ---- AppID + folder side by side ----
+        # ---- AppID + folder side by side (shared grid for alignment) ----
         mid_row = tk.Frame(self, bg=BG)
         mid_row.pack(fill='x', padx=MARGIN, pady=(0, 12))
+        mid_row.columnconfigure(1, weight=1)
 
-        # AppID (left)
-        aid_col = tk.Frame(mid_row, bg=BG)
-        aid_col.pack(side='left', anchor='n')
-        tk.Label(aid_col, text='Steam AppID', bg=BG, fg=FG,
+        # labels
+        tk.Label(mid_row, text='Steam AppID', bg=BG, fg=FG,
                  font=('Microsoft YaHei UI', 9)).grid(row=0, column=0, sticky='w')
-        tk.Entry(aid_col, textvariable=self.var_appid, width=14, font=('Microsoft YaHei UI', 9),
-                 relief='solid', borderwidth=1, bg='#f8fafc').grid(row=1, column=0, sticky='ew', ipady=3)
-        tk.Label(aid_col, text='举例：CS2=730, Dota2=570', bg=BG, fg=SUB,
-                 font=('Microsoft YaHei UI', 8)).grid(row=2, column=0, sticky='w')
+        tk.Label(mid_row, text='Steam 录像文件夹', bg=BG, fg=FG,
+                 font=('Microsoft YaHei UI', 9)).grid(row=0, column=1, sticky='w', padx=(20, 0))
 
-        # Folder (right)
-        fld_col = tk.Frame(mid_row, bg=BG)
-        fld_col.pack(side='left', padx=(20, 0), fill='x', expand=True, anchor='n')
-        tk.Label(fld_col, text='Steam 录像文件夹', bg=BG, fg=FG,
-                 font=('Microsoft YaHei UI', 9)).pack(anchor='w')
-        fld_inner = tk.Frame(fld_col, bg=BG)
-        fld_inner.pack(fill='x')
-        tk.Entry(fld_inner, textvariable=self.var_folder, font=('Microsoft YaHei UI', 9),
+        # entry row
+        tk.Entry(mid_row, textvariable=self.var_appid, width=14, font=('Microsoft YaHei UI', 9),
+                 relief='solid', borderwidth=1, bg='#f8fafc').grid(row=1, column=0, sticky='w', ipady=3)
+
+        fld_row = tk.Frame(mid_row, bg=BG)
+        fld_row.grid(row=1, column=1, sticky='ew', padx=(20, 0))
+        tk.Entry(fld_row, textvariable=self.var_folder, font=('Microsoft YaHei UI', 9),
                  relief='solid', borderwidth=1, bg='#f8fafc').pack(side='left', fill='x', expand=True, ipady=3)
-        tk.Button(fld_inner, text='浏览', command=self._browse_folder, width=6,
+        tk.Button(fld_row, text='浏览', command=self._browse_folder, width=6,
                   font=('Microsoft YaHei UI', 9), bg='#f1f5f9', relief='solid', borderwidth=1,
                   cursor='hand2').pack(side='left', padx=(8, 0), ipady=3)
+
+        # hint
+        tk.Label(mid_row, text='举例：CS2=730, Dota2=570', bg=BG, fg=SUB,
+                 font=('Microsoft YaHei UI', 8)).grid(row=2, column=0, sticky='w')
 
         # ---- progress ----
         tk.Label(self, text='导入进度', bg=BG, fg=FG,

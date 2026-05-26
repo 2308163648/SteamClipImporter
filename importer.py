@@ -14,77 +14,55 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from pb_utils import build_clip_pb, compute_names, update_gamerecording_pb
-import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------------------
-# MPD post-processing
+# constants
 # ---------------------------------------------------------------------------
 
-def _normalize_mpd(mpd_path: str, duration_s: float):
-    """Rewrite an ffmpeg-generated MPD (using SegmentTimeline) into the
-    format Steam expects.
-
-    - Normalises both adaptation sets to timescale=1_000_000.
-    - Injects ``hev1`` codec string and sensible bandwidths.
-    - Removes elements that Steam's player does not understand.
-    """
-    ET.register_namespace('', 'urn:mpeg:dash:schema:mpd:2011')
-    ET.register_namespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
-    ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
-
-    tree = ET.parse(mpd_path)
-    root = tree.getroot()
-    NS = 'urn:mpeg:dash:schema:mpd:2011'
-
-    # top-level attributes
-    root.set('timeShiftBufferDepth', 'PT2H0M0.0S')
-    root.set('minBufferTime', 'PT6.0S')
-    root.set('mediaPresentationDuration', f'PT{duration_s:.3f}S')
-
-    # remove unwanted children
-    for child in list(root):
-        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-        if tag in ('ProgramInformation', 'ServiceDescription'):
-            root.remove(child)
-
-    for period in root.findall(f'{{{NS}}}Period'):
-        for aset in period.findall(f'{{{NS}}}AdaptationSet'):
-            ct = aset.get('contentType', '')
-            # remove ffmpeg-specific attrs
-            for attr in ('frameRate', 'par', 'lang', 'sar'):
-                aset.attrib.pop(attr, None)
-
-            for rep in aset.findall(f'{{{NS}}}Representation'):
-                if ct == 'video':
-                    rep.set('codecs', 'hev1.2.4.L123.B0')
-                    rep.set('bandwidth', '12000000')
-                    rep.set('width', '1920')
-                    rep.set('height', '1080')
-                elif ct == 'audio':
-                    rep.set('bandwidth', '128000')
-                    rep.set('audioSamplingRate', '48000')
-
-                # normalise SegmentTimeline → timescale 1_000_000
-                tmpl = rep.find(f'{{{NS}}}SegmentTemplate')
-                if tmpl is None:
-                    continue
-                old_ts = int(tmpl.get('timescale', '1000000'))
-                tmpl.set('timescale', '1000000')
-
-                tl = tmpl.find(f'{{{NS}}}SegmentTimeline')
-                if tl is None:
-                    continue
-
-                for s_elem in tl.findall(f'{{{NS}}}S'):
-                    # only patch t if explicitly present (first segment only)
-                    t_str = s_elem.get('t')
-                    if t_str is not None:
-                        t_val = int(t_str)
-                        s_elem.set('t', str(int(t_val * 1_000_000 / old_ts)))
-                    d_val = int(s_elem.get('d', '0'))
-                    s_elem.set('d', str(max(1, int(d_val * 1_000_000 / old_ts))))
-
-    tree.write(mpd_path, xml_declaration=True, encoding='utf-8')
+def _build_mpd(duration_s: float, seg_dur: int = 3) -> str:
+    """Build a DASH MPD exactly matching native Steam format."""
+    dur = f'{duration_s:.3f}'
+    seg_us = seg_dur * 1_000_000
+    max_sd = f'PT{seg_dur}.0S'
+    return ('﻿<?xml version="1.0" encoding="utf-8"?>\n'
+            '<MPD xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+            ' xmlns="urn:mpeg:dash:schema:mpd:2011"'
+            ' xmlns:xlink="http://www.w3.org/1999/xlink"'
+            ' xsi:schemaLocation="urn:mpeg:DASH:schema:MPD:2011'
+            ' http://standards.iso.org/ittf/PubliclyAvailableStandards/MPEG-DASH_schema_files/DASH-MPD.xsd"'
+            ' profiles="urn:mpeg:dash:profile:isoff-live:2011"'
+            ' type="static" timeShiftBufferDepth="PT2H0M0.0S"'
+            f' maxSegmentDuration="{max_sd}" minBufferTime="PT6.0S"'
+            f' mediaPresentationDuration="PT{dur}S">\n'
+            '    <Period id="0" start="PT0S">\n'
+            '        <AdaptationSet id="0" contentType="video" startWithSAP="1"'
+            ' segmentAlignment="true" bitstreamSwitching="true"'
+            ' maxWidth="1920" maxHeight="1080">\n'
+            '            <Representation id="0" mimeType="video/mp4"'
+            ' codecs="hev1.2.4.L123.B0" bandwidth="12000000"'
+            ' width="1920" height="1080">\n'
+            f'                <SegmentTemplate timescale="1000000" duration="{seg_us}"'
+            ' initialization="init-stream$RepresentationID$.m4s"'
+            ' media="chunk-stream$RepresentationID$-$Number%05d$.m4s"'
+            ' startNumber="1"/>\n'
+            '            </Representation>\n'
+            '        </AdaptationSet>\n'
+            '        <AdaptationSet id="1" contentType="audio" startWithSAP="1"'
+            ' segmentAlignment="true" bitstreamSwitching="true">\n'
+            '            <Representation id="1" mimeType="audio/mp4"'
+            ' codecs="mp4a.40.2" bandwidth="128000"'
+            ' audioSamplingRate="48000">\n'
+            '                <AudioChannelConfiguration'
+            ' schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011"'
+            ' value="2"/>\n'
+            f'                <SegmentTemplate timescale="1000000" duration="{seg_us}"'
+            ' initialization="init-stream$RepresentationID$.m4s"'
+            ' media="chunk-stream$RepresentationID$-$Number%05d$.m4s"'
+            ' startNumber="1"/>\n'
+            '            </Representation>\n'
+            '        </AdaptationSet>\n'
+            '    </Period>\n'
+            '</MPD>\n')
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -164,7 +142,16 @@ def import_video(
     info = _ffprobe_json(video_path)
 
     duration_s = float(info['format']['duration'])
-    duration_ms = int(duration_s * 1000)
+
+    # trim to nearest 3s boundary so all DASH segments are full
+    import math
+    trimmed_dur = math.floor(duration_s / 3.0) * 3
+    # only trim if it loses < 1s or < 10% of duration
+    if trimmed_dur < 1 or (duration_s - trimmed_dur) > max(1.0, duration_s * 0.1):
+        trimmed_dur = duration_s
+    trim_flag = ['-t', str(trimmed_dur)] if trimmed_dur < duration_s - 0.1 else []
+
+    duration_ms = int(trimmed_dur * 1000)
 
     # pick first video / audio streams
     video_stream = audio_stream = None
@@ -179,8 +166,12 @@ def import_video(
     if audio_stream is None:
         raise ValueError('视频文件中没有音频流')
 
-    _report(progress_cb, 5, f'视频时长: {duration_s:.1f}s, '
-             f'{video_stream.get("width")}x{video_stream.get("height")}')
+    if trim_flag:
+        _report(progress_cb, 5, f'视频时长: {duration_s:.1f}s → 裁剪至 {trimmed_dur:.0f}s, '
+                 f'{video_stream.get("width")}x{video_stream.get("height")}')
+    else:
+        _report(progress_cb, 5, f'视频时长: {duration_s:.1f}s, '
+                 f'{video_stream.get("width")}x{video_stream.get("height")}')
 
     # ---- step 2: create directory structure ----
     _report(progress_cb, 8, '正在创建目录...')
@@ -197,13 +188,14 @@ def import_video(
     _report(progress_cb, 12, '正在转码视频 (HEVC 1080p)...')
 
     frag_tmp = os.path.join(video_dir, '_frag_temp.mp4')
-    total_dur = duration_s
+    total_dur = trimmed_dur
     last_pct = 15
 
     # pass 1 — fragmented MP4 (15 % → 72 %)
     cmd1 = [
         'ffmpeg', '-y', '-i', video_path,
-        '-c:v', 'libx265', '-preset', 'slow', '-crf', '18', '-pix_fmt', 'yuv420p',
+        *trim_flag,
+        '-c:v', 'libx265', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
         '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',
         '-force_key_frames', 'expr:gte(t,n_forced*3)',
         '-c:a', 'aac', '-b:a', '128k', '-ar', '48000', '-ac', '2',
@@ -233,7 +225,7 @@ def import_video(
     _report(progress_cb, 73, '正在生成 DASH 分段...')
     cmd2 = [
         'ffmpeg', '-y', '-i', frag_tmp, '-c', 'copy',
-        '-f', 'dash', '-seg_duration', '3', '-use_template', '1', '-use_timeline', '1',
+        '-f', 'dash', '-seg_duration', '3', '-use_template', '1', '-use_timeline', '0',
         '-init_seg_name', 'init-stream$RepresentationID$.m4s',
         '-media_seg_name', 'chunk-stream$RepresentationID$-$Number%05d$.m4s',
         'session.mpd',
@@ -279,9 +271,10 @@ def import_video(
     with open(tl_path, 'w', encoding='utf-8') as f:
         json.dump(tl_json, f, indent='\t')
 
-    # 5b. session.mpd — normalise ffmpeg-generated with SegmentTimeline
+    # 5b. session.mpd — use padded duration for clean segment alignment
     mpd_path = os.path.join(video_dir, 'session.mpd')
-    _normalize_mpd(mpd_path, duration_s)
+    with open(mpd_path, 'w', encoding='utf-8') as f:
+        f.write(_build_mpd(trimmed_dur))
 
     # 5c. clip.pb
     clip_pb = build_clip_pb(
