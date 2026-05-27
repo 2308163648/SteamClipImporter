@@ -1,7 +1,5 @@
 # Steam Clip Importer / Steam 剪辑导入器
 
-**English** | [中文](#中文)
-
 Import any video into Steam Game Recording as a clip — one click.
 
 ---
