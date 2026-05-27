@@ -22,7 +22,7 @@ Import any video into Steam Game Recording as a clip — one click.
 
 ## Quick Start
 
-1. Download `SteamClipImporter.exe` from [Releases](../../releases)
+1. Download `SteamClipImporter.exe` from [发布](../../releases)
 2. Double-click to launch
 3. Select a video file
 4. Enter the Steam AppID (e.g. CS2=730, Dota2=570)
@@ -93,8 +93,6 @@ This tool automates: video transcode → DASH segmentation → metadata generati
 
 ---
 
-## 中文
-
 将任意视频一键导入 Steam 游戏录制剪辑。
 
 ### 功能
@@ -113,7 +111,7 @@ This tool automates: video transcode → DASH segmentation → metadata generati
 
 ### 快速使用
 
-1. 从 [Releases](../../releases) 下载 `SteamClipImporter.exe`
+1. 从 [发布](../../releases) 下载 `SteamClipImporter.exe`
 2. 双击运行
 3. 选择视频文件
 4. 填写 Steam AppID（如 CS2=730, Dota2=570）
