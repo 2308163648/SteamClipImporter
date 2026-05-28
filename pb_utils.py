@@ -10,6 +10,16 @@ from datetime import datetime
 
 # ---- Varint encoding ----
 
+def decode_varint(data: bytes, pos: int):
+    """Decode a protobuf varint from position, return (value, new_pos)."""
+    result = 0; shift = 0
+    while pos < len(data):
+        byte = data[pos]; result |= (byte & 0x7f) << shift; pos += 1
+        if not (byte & 0x80): return result, pos
+        shift += 7
+    return None, pos
+
+
 def encode_varint(value: int) -> bytes:
     """Encode an unsigned integer as a protobuf varint."""
     result = []
@@ -143,6 +153,35 @@ def update_gamerecording_pb(data: bytes, appid: int, timeline_name: str, ts_unix
     session_inner += _tag(2, _WIRE_LENGTH_DELIMITED) + encode_varint(len(clip_inner)) + clip_inner
 
     result += _tag(2, _WIRE_LENGTH_DELIMITED) + encode_varint(len(session_inner)) + session_inner
+
+    # --- 3. Append game entry if this appid has none ---
+    has_entry = False
+    pos = 0
+    while pos < len(result):
+        tag, pos2 = decode_varint(result, pos)
+        fn = tag >> 3; wt = tag & 0x7
+        if fn == 4 and wt == _WIRE_LENGTH_DELIMITED:
+            length, pos3 = decode_varint(result, pos2)
+            inner = result[pos3:pos3+length]
+            ip = 0
+            while ip < len(inner):
+                itag, ip2 = decode_varint(inner, ip)
+                ifn = itag >> 3; iwt = itag & 0x7
+                if ifn == 1 and iwt == _WIRE_VARINT:
+                    val, _ = decode_varint(inner, ip2)
+                    if val == appid: has_entry = True
+                    break
+                ip = ip2
+            if has_entry: break
+        pos = pos2
+
+    if not has_entry:
+        gi = b''; gi += string_field(1, 'Recordings'); gi += string_field(2, 'General'); gi += varint_field(4, 100)
+        tr = b''; tr += string_field(2, timeline_name); tr += varint_field(3, duration_ms)
+        ge = b''; ge += varint_field(1, appid)
+        ge += _tag(2, _WIRE_LENGTH_DELIMITED) + encode_varint(len(gi)) + gi
+        ge += _tag(3, _WIRE_LENGTH_DELIMITED) + encode_varint(len(tr)) + tr
+        result += _tag(4, _WIRE_LENGTH_DELIMITED) + encode_varint(len(ge)) + ge
 
     return bytes(result)
 

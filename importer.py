@@ -78,17 +78,22 @@ def _ffprobe_json(video_path: str):
         capture_output=True, text=True, timeout=120,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
     )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise RuntimeError(f'无法解析视频文件: {video_path}\n{proc.stderr}')
     return json.loads(proc.stdout)
 
 
+_RE_TIME1 = re.compile(r'time=(\d+):(\d+):(\d+\.?\d*)')
+_RE_TIME2 = re.compile(r'time=(\d+\.?\d+)')
+
 def _parse_ffmpeg_progress(line: str) -> Optional[float]:
-    m = re.search(r'time=(\d+):(\d+):(\d+\.?\d*)', line)
-    if not m:
-        m = re.search(r'time=(\d+\.?\d+)', line)
-        if m:
-            return float(m.group(1))
-        return None
-    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    m = _RE_TIME1.search(line)
+    if m:
+        return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    m = _RE_TIME2.search(line)
+    if m:
+        return float(m.group(1))
+    return None
 
 
 # ---------------------------------------------------------------------------
